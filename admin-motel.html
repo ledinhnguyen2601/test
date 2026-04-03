@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Chủ Trọ - Quản lý</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    />
+  </head>
+  <body>
+    <div class="dashboard-layout">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <i class="fas fa-home"></i> Quản lý Xóm Trọ
+        </div>
+        <ul class="nav-menu">
+          <li class="active">
+            <a href="#" onclick="switchTab('tab-chotso', this)"
+              ><i class="fas fa-bolt"></i> Duyệt Điện / Nước</a
+            >
+          </li>
+          <li>
+            <a href="#" onclick="switchTab('tab-baohong', this)"
+              ><i class="fas fa-wrench"></i> Báo hỏng (Cư dân gửi)</a
+            >
+          </li>
+        </ul>
+      </aside>
+      <main class="main-content">
+        <header class="topbar">
+          <h2 style="font-size: 1.1rem">Bảng điều khiển Trung tâm</h2>
+          <div style="display: flex; align-items: center; gap: 15px">
+            <span id="admin-name" style="font-weight: 600; font-size: 0.9rem"
+              >Chủ trọ Admin</span
+            >
+            <button
+              class="btn btn-outline logout-btn"
+              style="padding: 5px 10px; font-size: 0.85rem; width: auto"
+            >
+              Đăng xuất
+            </button>
+          </div>
+        </header>
+
+        <div class="container" style="padding-top: 30px">
+          <div id="tab-chotso" class="content-section">
+            <div class="card">
+              <h3
+                style="
+                  margin-bottom: 15px;
+                  border-bottom: 1px solid var(--border-color);
+                  padding-bottom: 10px;
+                "
+              >
+                Duyệt Số Điện Nước (Realtime)
+              </h3>
+              <div class="table-responsive">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Phòng</th>
+                      <th>Ngày nộp</th>
+                      <th>Điện Mới</th>
+                      <th>Nước Mới</th>
+                      <th>Trạng thái</th>
+                      <th>Thao tác</th>
+                    </tr>
+                  </thead>
+                  <tbody id="utilities-tbody">
+                    <tr>
+                      <td
+                        colspan="6"
+                        style="text-align: center; color: var(--text-muted)"
+                      >
+                        Đang kéo dữ liệu từ hệ thống...
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div id="tab-baohong" class="content-section" style="display: none">
+            <div class="card">
+              <h3
+                style="
+                  margin-bottom: 15px;
+                  border-bottom: 1px solid var(--border-color);
+                  padding-bottom: 10px;
+                "
+              >
+                Yêu cầu hỗ trợ từ Khách thuê (Realtime)
+              </h3>
+              <div class="table-responsive">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Phòng</th>
+                      <th>Ngày nộp</th>
+                      <th>Loại lỗi</th>
+                      <th>Chi tiết sự cố</th>
+                      <th>Cập nhật Trạng thái</th>
+                    </tr>
+                  </thead>
+                  <tbody id="reports-tbody">
+                    <tr>
+                      <td
+                        colspan="5"
+                        style="text-align: center; color: var(--text-muted)"
+                      >
+                        Đang kéo dữ liệu từ hệ thống...
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <script type="module">
+      import { auth, db } from "./js/firebase.js";
+      import {
+        onAuthStateChanged,
+        signOut,
+      } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+      import {
+        doc,
+        getDoc,
+        collection,
+        getDocs,
+        query,
+        where,
+        updateDoc,
+        orderBy,
+      } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+
+      let userData = null;
+
+      // 1. Xác thực Admin
+      onAuthStateChanged(auth, async (user) => {
+        if (!user) return (window.location.href = "login.html");
+        const d = await getDoc(doc(db, "users", user.uid));
+        userData = d.data();
+        document.getElementById("admin-name").innerText =
+          userData.name || "Chủ Trọ Admin";
+
+        // Kéo dữ liệu sau khi xác thực xong
+        loadUtilities();
+        loadReports();
+      });
+
+      document
+        .querySelector(".logout-btn")
+        .addEventListener("click", () => signOut(auth));
+
+      // 2. Kéo dữ liệu Điện Nước của đúng Tòa nhà quản lý
+      async function loadUtilities() {
+        const q = query(
+          collection(db, "utilities"),
+          where("building", "==", userData.building),
+        );
+        const snap = await getDocs(q);
+        const tbody = document.getElementById("utilities-tbody");
+        tbody.innerHTML = "";
+
+        if (snap.empty) {
+          tbody.innerHTML = `<tr><td colspan="6" style="text-align: center;">Chưa có khách nào nộp chỉ số.</td></tr>`;
+          return;
+        }
+
+        snap.forEach((docSnap) => {
+          const item = docSnap.data();
+          const isChot = item.status === "Đã chốt";
+          const btnHtml = isChot
+            ? `<button class="btn btn-outline" style="padding:6px; font-size:0.8rem; width:auto;" disabled>Đã Xuất Bill</button>`
+            : `<button class="btn btn-primary btn-duyet" data-id="${docSnap.id}" style="padding:6px 12px; font-size:0.8rem; width:auto;">Duyệt & Xuất Bill</button>`;
+          const badgeHtml = isChot
+            ? `<span class="badge" style="background:#d1fae5; color:#10b981;">Đã chốt</span>`
+            : `<span class="badge" style="background:#fef3c7; color:#d97706;">Chưa chốt</span>`;
+
+          tbody.innerHTML += `
+                <tr>
+                    <td><strong style="color: var(--primary-color);">${item.room}</strong></td>
+                    <td>${item.date}</td>
+                    <td><strong style="font-size:1.1rem;">${item.dienMoi}</strong></td>
+                    <td><strong style="font-size:1.1rem;">${item.nuocMoi}</strong></td>
+                    <td>${badgeHtml}</td>
+                    <td>${btnHtml}</td>
+                </tr>`;
+        });
+
+        // Gắn sự kiện cho các nút Duyệt
+        document.querySelectorAll(".btn-duyet").forEach((btn) => {
+          btn.addEventListener("click", async (e) => {
+            const id = e.target.getAttribute("data-id");
+            e.target.innerText = "...";
+            await updateDoc(doc(db, "utilities", id), { status: "Đã chốt" });
+            alert("Đã duyệt số thành công! Hệ thống lưu lịch sử bảo mật.");
+            loadUtilities(); // Load lại bảng
+          });
+        });
+      }
+
+      // 3. Kéo dữ liệu Báo Lỗi
+      async function loadReports() {
+        const q = query(
+          collection(db, "reports"),
+          where("building", "==", userData.building),
+        );
+        const snap = await getDocs(q);
+        const tbody = document.getElementById("reports-tbody");
+        tbody.innerHTML = "";
+
+        if (snap.empty) {
+          tbody.innerHTML = `<tr><td colspan="5" style="text-align: center;">Chưa có báo cáo sự cố nào.</td></tr>`;
+          return;
+        }
+
+        snap.forEach((docSnap) => {
+          const item = docSnap.data();
+          tbody.innerHTML += `
+                <tr>
+                    <td><strong style="color: var(--primary-color);">${item.room}</strong></td>
+                    <td>${item.date}</td>
+                    <td><strong>${item.type}</strong></td>
+                    <td>${item.description}</td>
+                    <td>
+                        <select class="status-select" data-id="${docSnap.id}" style="margin:0; padding: 5px; font-size: 0.85rem; width: 120px;">
+                            <option value="Tiếp nhận" ${item.status === "Tiếp nhận" ? "selected" : ""}>Tiếp nhận</option>
+                            <option value="Đang sửa" ${item.status === "Đang sửa" ? "selected" : ""}>Đang sửa</option>
+                            <option value="Hoàn thành" ${item.status === "Hoàn thành" ? "selected" : ""}>Hoàn thành</option>
+                        </select>
+                    </td>
+                </tr>`;
+        });
+
+        // Gắn sự kiện khi Admin đổi Trạng thái sửa chữa
+        document.querySelectorAll(".status-select").forEach((sel) => {
+          sel.addEventListener("change", async (e) => {
+            const id = e.target.getAttribute("data-id");
+            const val = e.target.value;
+            await updateDoc(doc(db, "reports", id), { status: val });
+            alert("Cập nhật trạng thái sự cố thành công!");
+          });
+        });
+      }
+
+      window.switchTab = function (tabId, element) {
+        document
+          .querySelectorAll(".content-section")
+          .forEach((sec) => (sec.style.display = "none"));
+        document
+          .querySelectorAll(".nav-menu li")
+          .forEach((li) => li.classList.remove("active"));
+        document.getElementById(tabId).style.display = "block";
+        element.parentElement.classList.add("active");
+      };
+    </script>
+  </body>
+</html>
