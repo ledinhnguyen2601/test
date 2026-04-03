@@ -33,20 +33,25 @@
           </li>
           <li>
             <a href="#" onclick="switchTab('tab-baohong', this)"
-              ><i class="fas fa-wrench"></i> Yêu cầu hỗ trợ</a
+              ><i class="fas fa-wrench"></i> Yêu cầu hỗ trợ (Realtime)</a
             >
           </li>
         </ul>
       </aside>
       <main class="main-content">
         <header class="topbar">
-          <h2 style="font-size: 1.1rem">Hệ thống Tòa nhà Hoa Sen</h2>
-          <button
-            class="btn btn-outline logout-btn"
-            style="padding: 5px 10px; font-size: 0.85rem; width: auto"
-          >
-            Đăng xuất
-          </button>
+          <h2 id="building-display" style="font-size: 1.1rem">Đang tải...</h2>
+          <div style="display: flex; align-items: center; gap: 15px">
+            <span id="admin-name" style="font-weight: 600; font-size: 0.9rem"
+              >BQL Admin</span
+            >
+            <button
+              class="btn btn-outline logout-btn"
+              style="padding: 5px 10px; font-size: 0.85rem; width: auto"
+            >
+              Đăng xuất
+            </button>
+          </div>
         </header>
 
         <div class="container" style="padding-top: 20px">
@@ -72,8 +77,10 @@
                 </h3>
               </div>
               <div class="card">
-                <label>Sự cố cần xử lý</label>
-                <h3 style="font-size: 1.5rem; color: #ef4444">1 Vấn đề</h3>
+                <label>Sự cố đang chờ xử lý</label>
+                <h3 id="stat-issues" style="font-size: 1.5rem; color: #ef4444">
+                  Đang quét...
+                </h3>
               </div>
             </div>
           </div>
@@ -136,39 +143,26 @@
                   padding-bottom: 10px;
                 "
               >
-                Yêu cầu hỗ trợ từ Cư dân
+                Yêu cầu hỗ trợ từ Cư dân (Dữ liệu Thật)
               </h3>
               <div class="table-responsive">
                 <table>
                   <thead>
                     <tr>
                       <th>Căn hộ</th>
+                      <th>Ngày gửi</th>
                       <th>Loại sự cố</th>
                       <th>Chi tiết</th>
-                      <th>Thời gian</th>
                       <th>Trạng thái</th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody id="reports-tbody">
                     <tr>
-                      <td><strong>Căn 301</strong></td>
-                      <td>Thang máy</td>
-                      <td>Thang máy số 2 kêu to</td>
-                      <td>02/04/2026</td>
-                      <td>
-                        <select
-                          style="
-                            margin: 0;
-                            padding: 5px;
-                            font-size: 0.85rem;
-                            width: 120px;
-                          "
-                          onchange="alert('Đã cập nhật trạng thái xử lý!')"
-                        >
-                          <option>Tiếp nhận</option>
-                          <option>Đang sửa</option>
-                          <option>Hoàn thành</option>
-                        </select>
+                      <td
+                        colspan="5"
+                        style="text-align: center; color: var(--text-muted)"
+                      >
+                        Đang kéo dữ liệu từ hệ thống...
                       </td>
                     </tr>
                   </tbody>
@@ -179,9 +173,102 @@
         </div>
       </main>
     </div>
-    <script type="module" src="js/auth.js"></script>
-    <script>
-      function switchTab(tabId, element) {
+
+    <script type="module">
+      import { auth, db } from "./js/firebase.js";
+      import {
+        onAuthStateChanged,
+        signOut,
+      } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+      import {
+        doc,
+        getDoc,
+        collection,
+        getDocs,
+        query,
+        where,
+        updateDoc,
+      } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+
+      let userData = null;
+
+      // 1. Xác thực Admin
+      onAuthStateChanged(auth, async (user) => {
+        if (!user) return (window.location.href = "login.html");
+        const d = await getDoc(doc(db, "users", user.uid));
+        userData = d.data();
+        document.getElementById("admin-name").innerText =
+          userData.name || "BQL Admin";
+        document.getElementById("building-display").innerText =
+          "Quản lý tòa nhà: " +
+          (userData.building === "hoasen"
+            ? "Chung cư Hoa Sen"
+            : userData.building);
+
+        // Kéo dữ liệu Báo cáo sự cố
+        loadReports();
+      });
+
+      document
+        .querySelector(".logout-btn")
+        .addEventListener("click", () => signOut(auth));
+
+      // 2. Kéo dữ liệu Báo Lỗi từ Firebase
+      async function loadReports() {
+        const q = query(
+          collection(db, "reports"),
+          where("building", "==", userData.building),
+        );
+        const snap = await getDocs(q);
+        const tbody = document.getElementById("reports-tbody");
+        tbody.innerHTML = "";
+        let pendingCount = 0;
+
+        if (snap.empty) {
+          tbody.innerHTML = `<tr><td colspan="5" style="text-align: center;">Chưa có báo cáo sự cố nào.</td></tr>`;
+          document.getElementById("stat-issues").innerText = "0 Vấn đề";
+          return;
+        }
+
+        snap.forEach((docSnap) => {
+          const item = docSnap.data();
+          if (item.status === "Tiếp nhận" || item.status === "Đang sửa")
+            pendingCount++;
+
+          tbody.innerHTML += `
+                <tr>
+                    <td><strong style="color: var(--primary-color);">${item.room}</strong></td>
+                    <td>${item.date}</td>
+                    <td><strong>${item.type}</strong></td>
+                    <td>${item.description}</td>
+                    <td>
+                        <select class="status-select" data-id="${docSnap.id}" style="margin:0; padding: 5px; font-size: 0.85rem; width: 120px;">
+                            <option value="Tiếp nhận" ${item.status === "Tiếp nhận" ? "selected" : ""}>Tiếp nhận</option>
+                            <option value="Đang sửa" ${item.status === "Đang sửa" ? "selected" : ""}>Đang sửa</option>
+                            <option value="Hoàn thành" ${item.status === "Hoàn thành" ? "selected" : ""}>Hoàn thành</option>
+                        </select>
+                    </td>
+                </tr>`;
+        });
+
+        document.getElementById("stat-issues").innerText =
+          pendingCount + " Vấn đề";
+
+        // Cập nhật trạng thái sự cố lên DB
+        document.querySelectorAll(".status-select").forEach((sel) => {
+          sel.addEventListener("change", async (e) => {
+            const id = e.target.getAttribute("data-id");
+            const val = e.target.value;
+            await updateDoc(doc(db, "reports", id), { status: val });
+            alert(
+              "Cập nhật tiến độ xử lý thành công! Dữ liệu đã lưu lên Cloud.",
+            );
+            loadReports(); // Tải lại để cập nhật số đếm
+          });
+        });
+      }
+
+      window.switchTab = function (tabId, element) {
         document
           .querySelectorAll(".content-section")
           .forEach((sec) => (sec.style.display = "none"));
@@ -190,7 +277,7 @@
           .forEach((li) => li.classList.remove("active"));
         document.getElementById(tabId).style.display = "block";
         element.parentElement.classList.add("active");
-      }
+      };
     </script>
   </body>
 </html>
